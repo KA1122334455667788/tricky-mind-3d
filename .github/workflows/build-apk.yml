@@ -25,6 +25,17 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Verify Gradle project
+        run: |
+          echo "=== CURRENT DIRECTORY ==="
+          pwd
+          echo "=== ROOT FILES ==="
+          ls -la
+          echo "=== GRADLE FILES ==="
+          test -f settings.gradle.kts && echo "settings.gradle.kts FOUND"
+          test -f build.gradle.kts && echo "build.gradle.kts FOUND"
+          test -f gradle.properties && echo "gradle.properties FOUND"
+
       - name: Build Debug APK
         run: gradle assembleDebug --stacktrace
 
