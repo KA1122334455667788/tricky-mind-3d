@@ -25,8 +25,32 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Verify Gradle project
+        run: |
+          echo "=== ROOT ==="
+          pwd
+          ls -la
+
+          echo "=== SETTINGS ==="
+          test -f settings.gradle.kts && echo "settings.gradle.kts FOUND"
+
+          echo "=== APP MODULE ==="
+          ls -la app
+          test -f app/build.gradle.kts && echo "app/build.gradle.kts FOUND"
+
+          echo "=== MANIFEST ==="
+          test -f app/src/main/AndroidManifest.xml && echo "app/src/main/AndroidManifest.xml FOUND"
+
+          echo "=== SOURCE ==="
+          ls -la app/src/main
+
+      - name: Verify Gradle modules
+        run: |
+          gradle projects --stacktrace
+
       - name: Build Debug APK
-        run: gradle assembleDebug --stacktrace
+        run: |
+          gradle :app:assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
