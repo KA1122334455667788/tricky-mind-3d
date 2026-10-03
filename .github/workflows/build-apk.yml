@@ -52,10 +52,25 @@ jobs:
       - name: Verify Gradle modules
         run: |
           gradle projects --stacktrace
+      - name: Diagnose App Gradle Tasks
+        run: |
+          echo "=== SETTINGS ==="
+          cat settings.gradle.kts
 
+          echo "=== ROOT BUILD ==="
+          cat build.gradle.kts
+
+          echo "=== APP BUILD ==="
+          cat app/build.gradle.kts
+
+          echo "=== PROJECTS ==="
+          ./gradlew projects
+
+          echo "=== APP TASKS ==="
+          ./gradlew :app:tasks --all
       - name: Build Debug APK
         run: |
-          gradle :app:assembleDebug --stacktrace
+          ./gradlew :app:assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
