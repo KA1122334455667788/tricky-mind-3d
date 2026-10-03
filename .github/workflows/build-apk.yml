@@ -31,13 +31,31 @@ jobs:
           pwd
           echo "=== ROOT FILES ==="
           ls -la
+
           echo "=== GRADLE FILES ==="
           test -f settings.gradle.kts && echo "settings.gradle.kts FOUND"
           test -f build.gradle.kts && echo "build.gradle.kts FOUND"
           test -f gradle.properties && echo "gradle.properties FOUND"
 
+      - name: Verify Android module
+        run: |
+          echo "=== APP DIRECTORY ==="
+          ls -la app
+          test -f app/build.gradle.kts && echo "app/build.gradle.kts FOUND"
+
+          echo "=== MANIFEST ==="
+          test -f app/src/main/AndroidManifest.xml && echo "app/src/main/AndroidManifest.xml FOUND"
+
+          echo "=== SOURCE ==="
+          ls -la app/src/main
+
+      - name: Verify Gradle modules
+        run: |
+          gradle projects --stacktrace
+
       - name: Build Debug APK
-        run: gradle assembleDebug --stacktrace
+        run: |
+          gradle :app:assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
