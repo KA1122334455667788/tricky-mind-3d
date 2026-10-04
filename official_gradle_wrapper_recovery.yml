@@ -21,34 +21,37 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Download and Verify Official Gradle 8.9 Bin ZIP
+      - name: Download, Verify and Extract Official Gradle 8.9 in /tmp
         run: |
           DIST_URL="https://services.gradle.org/distributions/gradle-8.9-bin.zip"
           SHA_URL="https://services.gradle.org/distributions/gradle-8.9-bin.zip.sha256"
           
-          echo "Downloading official Gradle 8.9 binary zip..."
-          curl -f -L -o gradle-8.9-bin.zip "$DIST_URL" || { echo "::error::Failed to download gradle-8.9-bin.zip"; exit 1; }
+          echo "Downloading official Gradle 8.9 binary zip to /tmp..."
+          curl -f -L -o /tmp/gradle-8.9-bin.zip "$DIST_URL" || { echo "::error::Failed to download gradle-8.9-bin.zip"; exit 1; }
           
           echo "Downloading official SHA-256 checksum file..."
-          curl -f -L -o gradle-8.9-bin.zip.sha256 "$SHA_URL" || { echo "::error::Failed to download sha256 file"; exit 1; }
+          curl -f -L -o /tmp/gradle-8.9-bin.zip.sha256 "$SHA_URL" || { echo "::error::Failed to download sha256 file"; exit 1; }
           
           echo "Verifying SHA-256 checksum of binary distribution..."
-          EXPECTED_HASH=$(cat gradle-8.9-bin.zip.sha256 | awk '{print $1}')
-          ACTUAL_HASH=$(sha256sum gradle-8.9-bin.zip | awk '{print $1}')
+          EXPECTED_HASH=$(cat /tmp/gradle-8.9-bin.zip.sha256 | awk '{print $1}')
+          ACTUAL_HASH=$(sha256sum /tmp/gradle-8.9-bin.zip | awk '{print $1}')
           
           echo "Expected: $EXPECTED_HASH"
           echo "Actual:   $ACTUAL_HASH"
           
           if [ "$ACTUAL_HASH" != "$EXPECTED_HASH" ]; then
             echo "::error::Checksum verification FAILED for gradle-8.9-bin.zip! Aborting immediately."
-            rm -f gradle-8.9-bin.zip gradle-8.9-bin.zip.sha256
+            rm -f /tmp/gradle-8.9-bin.zip /tmp/gradle-8.9-bin.zip.sha256
             exit 1
           fi
           
           echo "Checksum verification SUCCESSFUL!"
-          rm -f gradle-8.9-bin.zip.sha256
+          rm -f /tmp/gradle-8.9-bin.zip.sha256
 
-      - name: Snapshot Properties, Extract, and Generate Wrapper
+          echo "Extracting verified Gradle distribution to /tmp/gradle-8.9..."
+          unzip -q /tmp/gradle-8.9-bin.zip -d /tmp/
+
+      - name: Snapshot Properties, Generate Wrapper, and Validate
         run: |
           PROPS_PATH="gradle/wrapper/gradle-wrapper.properties"
           
@@ -62,15 +65,16 @@ jobs:
             exit 1
           fi
 
-          echo "Extracting verified Gradle distribution..."
-          unzip -q gradle-8.9-bin.zip
-          
-          echo "Generating wrapper using official Gradle 8.9 binary..."
-          ./gradle-8.9/bin/gradle wrapper --gradle-version 8.9 --distribution-type bin
+          echo "Generating wrapper using official Gradle 8.9 binary from /tmp..."
+          export GRADLE_USER_HOME="/tmp/.gradle"
+          /tmp/gradle-8.9/bin/gradle wrapper --gradle-version 8.9 --distribution-type bin
 
           # Restore original gradle-wrapper.properties exactly
           echo "Restoring original gradle-wrapper.properties..."
           mv gradle-wrapper.properties.bak "$PROPS_PATH"
+
+          # Discard any modifications to gradlew and gradlew.bat to keep repo clean
+          git checkout -- gradlew gradlew.bat 2>/dev/null || true
 
           # Verify properties hash matches original
           RESTORED_PROPS_HASH=$(sha256sum "$PROPS_PATH" | awk '{print $1}')
@@ -118,8 +122,9 @@ jobs:
 
       - name: Run Build Test Using Verified Extracted Gradle 8.9 Binary
         run: |
-          echo "Running build test with official extracted binary (no redownload)..."
-          ./gradle-8.9/bin/gradle assembleDebug --no-daemon
+          echo "Running build test with official extracted binary..."
+          export GRADLE_USER_HOME="/tmp/.gradle"
+          /tmp/gradle-8.9/bin/gradle assembleDebug --no-daemon
 
       - name: Post-Build Git Status Safety Check
         run: |
@@ -137,8 +142,8 @@ jobs:
       - name: Cleanup Build Binaries
         if: always()
         run: |
-          echo "Cleaning up temporary downloaded zip and extracted binary..."
-          rm -rf gradle-8.9-bin.zip gradle-8.9
+          echo "Cleaning up temporary files from /tmp..."
+          rm -rf /tmp/gradle-8.9-bin.zip /tmp/gradle-8.9 /tmp/.gradle
 
       - name: Commit and Push Restored Wrapper JAR
         if: success()
