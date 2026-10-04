@@ -1,4 +1,4 @@
-name: Official Gradle 8.2 Wrapper Bin Recovery & Safety Build
+name: Official Gradle 8.9 Wrapper Bin Recovery & Safety Build
 
 on:
   workflow_dispatch:
@@ -18,98 +18,139 @@ jobs:
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          distribution: temurin
+          distribution: 'temurin'
           java-version: '17'
 
-      - name: Download and Verify Official Gradle 8.2 Bin ZIP
+      - name: Download and Verify Official Gradle 8.9 Bin ZIP
         run: |
-          DIST_URL="https://services.gradle.org/distributions/gradle-8.2-bin.zip"
-          SHA_URL="https://services.gradle.org/distributions/gradle-8.2-bin.zip.sha256"
-
-          curl -fL -o gradle-8.2-bin.zip "$DIST_URL"
-          curl -fL -o gradle-8.2-bin.zip.sha256 "$SHA_URL"
-
-          EXPECTED_HASH=$(awk '{print $1}' gradle-8.2-bin.zip.sha256)
-          ACTUAL_HASH=$(sha256sum gradle-8.2-bin.zip | awk '{print $1}')
-
+          DIST_URL="https://services.gradle.org/distributions/gradle-8.9-bin.zip"
+          SHA_URL="https://services.gradle.org/distributions/gradle-8.9-bin.zip.sha256"
+          
+          echo "Downloading official Gradle 8.9 binary zip..."
+          curl -f -L -o gradle-8.9-bin.zip "$DIST_URL" || { echo "::error::Failed to download gradle-8.9-bin.zip"; exit 1; }
+          
+          echo "Downloading official SHA-256 checksum file..."
+          curl -f -L -o gradle-8.9-bin.zip.sha256 "$SHA_URL" || { echo "::error::Failed to download sha256 file"; exit 1; }
+          
+          echo "Verifying SHA-256 checksum of binary distribution..."
+          EXPECTED_HASH=$(cat gradle-8.9-bin.zip.sha256 | awk '{print $1}')
+          ACTUAL_HASH=$(sha256sum gradle-8.9-bin.zip | awk '{print $1}')
+          
           echo "Expected: $EXPECTED_HASH"
           echo "Actual:   $ACTUAL_HASH"
-
+          
           if [ "$ACTUAL_HASH" != "$EXPECTED_HASH" ]; then
-            echo "::error::Gradle 8.2 ZIP checksum verification FAILED"
+            echo "::error::Checksum verification FAILED for gradle-8.9-bin.zip! Aborting immediately."
+            rm -f gradle-8.9-bin.zip gradle-8.9-bin.zip.sha256
             exit 1
           fi
-
+          
           echo "Checksum verification SUCCESSFUL!"
+          rm -f gradle-8.9-bin.zip.sha256
 
-      - name: Extract Gradle and Generate Wrapper JAR
+      - name: Snapshot Properties, Extract, and Generate Wrapper
         run: |
-          unzip -q gradle-8.2-bin.zip
-
-          ./gradle-8.2/bin/gradle wrapper --gradle-version 8.2
-
-          if [ ! -f "gradle/wrapper/gradle-wrapper.jar" ]; then
-            echo "::error::gradle-wrapper.jar was not generated"
+          PROPS_PATH="gradle/wrapper/gradle-wrapper.properties"
+          
+          if [ -f "$PROPS_PATH" ]; then
+            echo "Saving original state of gradle-wrapper.properties..."
+            cp "$PROPS_PATH" gradle-wrapper.properties.bak
+            ORIGINAL_PROPS_HASH=$(sha256sum "$PROPS_PATH" | awk '{print $1}')
+            echo "Original properties SHA-256: $ORIGINAL_PROPS_HASH"
+          else
+            echo "::error::gradle-wrapper.properties is missing from repository!"
             exit 1
           fi
 
-          echo "gradle-wrapper.jar successfully generated."
+          echo "Extracting verified Gradle distribution..."
+          unzip -q gradle-8.9-bin.zip
+          
+          echo "Generating wrapper using official Gradle 8.9 binary..."
+          ./gradle-8.9/bin/gradle wrapper --gradle-version 8.9 --distribution-type bin
 
-          rm -rf gradle-8.2-bin.zip gradle-8.2-bin.zip.sha256 gradle-8.2
+          # Restore original gradle-wrapper.properties exactly
+          echo "Restoring original gradle-wrapper.properties..."
+          mv gradle-wrapper.properties.bak "$PROPS_PATH"
 
-      - name: Final Safety Check
-        run: |
-          echo "Checking project changes..."
+          # Verify properties hash matches original
+          RESTORED_PROPS_HASH=$(sha256sum "$PROPS_PATH" | awk '{print $1}')
+          if [ "$ORIGINAL_PROPS_HASH" != "$RESTORED_PROPS_HASH" ]; then
+            echo "::error::gradle-wrapper.properties hash mismatch after restoration!"
+            exit 1
+          fi
+          echo "Properties verification PASSED: 100% original content preserved."
 
-          CHANGED_FILES=$(git status --porcelain | sed 's/^.. //' | grep -v '^$' || true)
-
-          echo "Detected changes:"
-          printf '%s\n' "$CHANGED_FILES"
-
-          TARGET_FILE="gradle/wrapper/gradle-wrapper.jar"
-
-          if [ -z "$CHANGED_FILES" ]; then
-            echo "::error::No wrapper JAR change detected."
+          # Verify generated wrapper JAR exists and is non-zero
+          JAR_PATH="gradle/wrapper/gradle-wrapper.jar"
+          if [ ! -f "$JAR_PATH" ] || [ ! -s "$JAR_PATH" ]; then
+            echo "::error::gradle-wrapper.jar is missing or empty!"
             exit 1
           fi
 
-          FILE_COUNT=$(printf '%s\n' "$CHANGED_FILES" | wc -l | tr -d ' ')
+          # CRITICAL CLASS VERIFICATION: Verify GradleWrapperMain.class exists inside the JAR
+          echo "Verifying presence of GradleWrapperMain class inside JAR..."
+          jar tf "$JAR_PATH" | grep 'org/gradle/wrapper/GradleWrapperMain.class' || {
+            echo "::error::GradleWrapperMain.class not found in generated wrapper JAR!"
+            exit 1
+          }
+          echo "Class verification PASSED: GradleWrapperMain.class is present."
 
+      - name: Pre-Build Git Status Safety Check
+        run: |
+          echo "Running pre-build strict git status safety check..."
+          STATUS_OUTPUT=$(git status --porcelain)
+          echo "Git status output:"
+          echo "$STATUS_OUTPUT"
+          
+          FILE_COUNT=$(echo "$STATUS_OUTPUT" | grep -v '^$' | wc -l)
+          
           if [ "$FILE_COUNT" -ne 1 ]; then
-            echo "::error::Safety check FAILED: more than one file changed."
-            git status --short
+            echo "::error::Safety check FAILED! Expected exactly 1 changed/untracked file, but found $FILE_COUNT files."
             exit 1
           fi
-
-          if [ "$CHANGED_FILES" != "$TARGET_FILE" ]; then
-            echo "::error::Safety check FAILED: unexpected file changed."
-            git status --short
+          
+          if ! echo "$STATUS_OUTPUT" | grep -q "gradle/wrapper/gradle-wrapper.jar"; then
+            echo "::error::Safety check FAILED! The changed file is not gradle-wrapper.jar."
             exit 1
           fi
+          
+          echo "PRE-BUILD SAFETY CHECK PASSED."
 
-          echo "SAFETY CHECK PASSED."
-          echo "Only gradle/wrapper/gradle-wrapper.jar changed."
-
-      - name: Build Debug APK
+      - name: Run Build Test Using Verified Extracted Gradle 8.9 Binary
         run: |
-          chmod +x ./gradlew
-          ./gradlew assembleDebug --no-daemon
+          echo "Running build test with official extracted binary (no redownload)..."
+          ./gradle-8.9/bin/gradle assembleDebug --no-daemon
 
-      - name: Commit Restored Wrapper JAR
+      - name: Post-Build Git Status Safety Check
+        run: |
+          echo "Running post-build strict git status safety check..."
+          STATUS_OUTPUT=$(git status --porcelain)
+          echo "$STATUS_OUTPUT"
+          
+          FILE_COUNT=$(echo "$STATUS_OUTPUT" | grep -v '^$' | wc -l)
+          if [ "$FILE_COUNT" -ne 1 ] || ! echo "$STATUS_OUTPUT" | grep -q "gradle/wrapper/gradle-wrapper.jar"; then
+            echo "::error::Post-build safety check FAILED! Unintended files were modified during the build."
+            exit 1
+          fi
+          echo "POST-BUILD SAFETY CHECK PASSED."
+
+      - name: Cleanup Build Binaries
+        if: always()
+        run: |
+          echo "Cleaning up temporary downloaded zip and extracted binary..."
+          rm -rf gradle-8.9-bin.zip gradle-8.9
+
+      - name: Commit and Push Restored Wrapper JAR
         if: success()
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add gradle/wrapper/gradle-wrapper.jar
-
-          git diff --cached --name-only
-
-          git commit -m "chore: restore Gradle 8.2 wrapper JAR"
+          git commit -m "chore: securely generate and restore verified official gradle-8.9 wrapper-jar" || echo "No changes to commit"
           git push
 
-      - name: Upload Debug APK
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: tricky-mind-3d-debug-apk
+          name: debug-apks
           path: '**/build/outputs/apk/debug/*.apk'
