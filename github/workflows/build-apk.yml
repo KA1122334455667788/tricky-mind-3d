@@ -1,0 +1,48 @@
+name: Official Gradle 8.9 Wrapper Bin Recovery & Safety Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Gradle 8.9 & Isolate in /tmp
+        run: |
+          export GRADLE_USER_HOME="/tmp/.gradle"
+          mkdir -p /tmp/gradle-setup
+          cd /tmp/gradle-setup
+          
+          echo "Downloading Gradle 8.9..."
+          curl -L -o gradle-8.9-bin.zip https://services.gradle.org/distributions/gradle-8.9-bin.zip
+          unzip -q gradle-8.9-bin.zip
+          
+          cd $GITHUB_WORKSPACE
+          
+          # Generate/Update wrapper to Gradle 8.9 safely
+          /tmp/gradle-setup/gradle-8.9/bin/gradle wrapper --gradle-version 8.9 --distribution-type bin
+
+      - name: Verify Git Status (Safety Check)
+        run: |
+          git status --porcelain
+
+      - name: Build APK with Isolated Gradle User Home
+        run: |
+          export GRADLE_USER_HOME="/tmp/.gradle"
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
