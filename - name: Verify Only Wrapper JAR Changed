@@ -1,0 +1,27 @@
+      - name: Remove Temporary Wrapper-Generation Files
+        run: |
+          set -e
+
+          rm -rf .gradle
+          rm -rf gradle-8.9
+          rm -f gradle-8.9-bin.zip
+          rm -f gradle-8.9-bin.zip.sha256
+          rm -f gradlew
+          rm -f gradlew.bat
+
+      - name: Verify Only Wrapper JAR Changed
+        run: |
+          set -e
+
+          git status --short
+
+          STATUS_PATHS=$(git status --porcelain=v1 | sed 's/^.. //')
+
+          if [ "$STATUS_PATHS" != "gradle/wrapper/gradle-wrapper.jar" ]; then
+            echo "::error::Unexpected files changed."
+            echo "$STATUS_PATHS"
+            exit 1
+          fi
+
+          echo "Safety check PASSED."
+          echo "Only gradle/wrapper/gradle-wrapper.jar changed."
